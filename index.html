@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DNS & Domain Lookup Tool | Professional Network Diagnostics</title>
+  <meta name="description"
+    content="Modern serverless DNS and domain lookup tool for hosting support. Check A, MX, CNAME, NS, SOA, TXT records, and WHOIS information.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <!-- Theme Toggle -->
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+    <svg id="sunIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path
+        d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.121-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z" />
+    </svg>
+    <svg id="moonIcon" class="hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+      <path
+        d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z" />
+    </svg>
+  </button>
+
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1>🌐 DNS & Domain Lookup Tool</h1>
+      <p>Professional network diagnostics and domain information lookup</p>
+    </header>
+
+    <!-- Search Section -->
+    <section class="search-section">
+      <div class="input-group">
+        <label for="domainInput">Domain Name or IP Address</label>
+        <div class="input-wrapper">
+          <input type="text" id="domainInput" placeholder="example.com or 8.8.8.8" autocomplete="off"
+            spellcheck="false" autofocus>
+        </div>
+      </div>
+
+      <!-- DNS Record Actions -->
+      <div class="actions-section">
+        <h3>DNS Records</h3>
+        <div class="action-grid dns-record-grid">
+          <button class="action-btn" data-type="A">
+            <span>A Record</span>
+          </button>
+          <button class="action-btn" data-type="AAAA">
+            <span>AAAA Record</span>
+          </button>
+          <button class="action-btn" data-type="MX">
+            <span>MX Record</span>
+          </button>
+          <button class="action-btn" data-type="CNAME">
+            <span>CNAME</span>
+          </button>
+          <button class="action-btn" data-type="NS">
+            <span>NS Record</span>
+          </button>
+          <button class="action-btn" data-type="SOA">
+            <span>SOA Record</span>
+          </button>
+          <button class="action-btn" data-type="TXT">
+            <span>TXT Record</span>
+          </button>
+          <button class="action-btn" data-type="SPF">
+            <span>SPF Check</span>
+          </button>
+          <button class="action-btn" data-type="DMARC">
+            <span>DMARC Check</span>
+          </button>
+          <button class="action-btn" data-type="PTR">
+            <span>PTR Record</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- WHOIS Actions -->
+      <div class="actions-section">
+        <h3>WHOIS Lookup</h3>
+        <div class="action-grid">
+          <button class="action-btn" data-type="WHOIS">
+            <span>Domain WHOIS</span>
+          </button>
+          <button class="action-btn" data-type="IP_WHOIS">
+            <span>IP WHOIS</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Additional Tools -->
+      <div class="actions-section">
+        <h3>Advanced Tools</h3>
+        <div class="action-grid">
+          <button class="action-btn" data-type="ALL_RECORDS">
+            <span>All Records</span>
+          </button>
+          <button class="action-btn" data-type="PROPAGATION">
+            <span>DNS Propagation</span>
+          </button>
+          <button class="action-btn" data-type="REVERSE">
+            <span>Reverse DNS</span>
+          </button>
+          <button class="action-btn" data-type="SSL_CHECK">
+            <span>SSL Checker</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results Section -->
+    <section class="results-section">
+      <div class="results-header">
+        <h2>Results</h2>
+        <div class="results-actions">
+          <button class="icon-btn" id="exportBtn" style="display: none;">
+            <span>📥 Export</span>
+          </button>
+          <button class="icon-btn" id="clearBtn" style="display: none;">
+            <span>🗑️ Clear</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabs for different results -->
+      <div class="tabs" id="resultTabs" style="display: none;"></div>
+
+      <!-- Empty State -->
+      <div class="empty-state" id="emptyState">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+          <path
+            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+        </svg>
+        <h3>Ready to look up DNS records</h3>
+        <p>Enter a domain name or IP address above and click on any action button</p>
+      </div>
+
+      <!-- Loading State -->
+      <div class="loading-state hidden" id="loadingState">
+        <div class="spinner"></div>
+        <h3>Looking up DNS records...</h3>
+        <p id="loadingMessage">Please wait</p>
+      </div>
+
+      <!-- Results Content -->
+      <div class="results-content" id="resultsContent"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
