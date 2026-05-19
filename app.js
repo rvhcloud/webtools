@@ -29,7 +29,8 @@ const SHAREABLE_ACTION_TYPES = new Set([
   'ALL_RECORDS',
   'PROPAGATION',
   'REVERSE',
-  'SSL_CHECK'
+  'SSL_CHECK',
+  'BULK_NS_MX_REPORT'
 ]);
 
 // DNS Providers for multi-location checking
@@ -154,6 +155,16 @@ function initEventListeners() {
   // Export and Clear buttons
   document.getElementById('exportBtn').addEventListener('click', exportResults);
   document.getElementById('clearBtn').addEventListener('click', clearResults);
+
+  document.getElementById('bulkReportGenerateBtn').addEventListener('click', generateBulkNsMxReport);
+  document.getElementById('bulkReportCancelBtn').addEventListener('click', closeBulkReportModal);
+  document.getElementById('bulkReportCloseBtn').addEventListener('click', closeBulkReportModal);
+  document.querySelector('[data-close-bulk-modal]').addEventListener('click', closeBulkReportModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeBulkReportModal();
+    }
+  });
 }
 
 function focusDomainInput() {
@@ -189,6 +200,13 @@ async function handleAction(e) {
   const btn = e.currentTarget;
   const type = btn.dataset.type;
   const domainInput = document.getElementById('domainInput');
+
+  if (type === 'BULK_NS_MX_REPORT') {
+    setActiveActionButton(type);
+    openBulkReportModal();
+    return;
+  }
+
   const domain = normalizeDomainInput(domainInput.value);
 
   domainInput.value = domain;
@@ -386,6 +404,236 @@ async function checkPropagation(domain) {
   }
 
   displayResults('PROPAGATION');
+}
+
+// ============================================
+// Bulk NS & MX Report
+// ============================================
+
+function openBulkReportModal() {
+  const modal = document.getElementById('bulkReportModal');
+  const textarea = document.getElementById('bulkDomainInput');
+  const currentDomain = normalizeDomainInput(document.getElementById('domainInput').value);
+
+  if (currentDomain && isValidDomain(currentDomain) && !textarea.value.trim()) {
+    textarea.value = currentDomain;
+  }
+
+  resetBulkProgress();
+  modal.classList.remove('hidden');
+  textarea.focus();
+}
+
+function closeBulkReportModal() {
+  const modal = document.getElementById('bulkReportModal');
+  modal.classList.add('hidden');
+}
+
+function resetBulkProgress() {
+  const progress = document.getElementById('bulkProgress');
+  progress.classList.add('hidden');
+  updateBulkProgress(0, 'Preparing report...');
+  setBulkReportError('');
+}
+
+function updateBulkProgress(percent, message) {
+  const safePercent = Math.max(0, Math.min(100, percent));
+  document.getElementById('bulkProgressBar').style.width = `${safePercent}%`;
+  document.getElementById('bulkProgressCount').textContent = `${Math.round(safePercent)}%`;
+  document.getElementById('bulkProgressText').textContent = message;
+}
+
+function parseBulkDomains(value) {
+  const seen = new Set();
+
+  return String(value || '')
+    .split(/[\s,;]+/)
+    .map(normalizeDomainInput)
+    .filter(Boolean)
+    .filter(domain => {
+      const key = domain.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function setBulkReportError(message) {
+  const error = document.getElementById('bulkReportError');
+  error.textContent = message;
+  error.classList.toggle('hidden', !message);
+}
+
+async function generateBulkNsMxReport() {
+  const textarea = document.getElementById('bulkDomainInput');
+  const generateBtn = document.getElementById('bulkReportGenerateBtn');
+  const cancelBtn = document.getElementById('bulkReportCancelBtn');
+  const progress = document.getElementById('bulkProgress');
+  const domains = parseBulkDomains(textarea.value);
+  const invalidDomains = domains.filter(domain => !isValidDomain(domain));
+
+  setBulkReportError('');
+
+  if (!domains.length) {
+    setBulkReportError('Please enter at least one domain name for the bulk report.');
+    return;
+  }
+
+  if (invalidDomains.length) {
+    setBulkReportError(`Please remove invalid domain names: ${invalidDomains.join(', ')}`);
+    return;
+  }
+
+  state.currentDomain = 'bulk-report';
+  state.currentTest = 'BULK_NS_MX_REPORT';
+  state.results = {};
+  state.activeTab = null;
+
+  generateBtn.disabled = true;
+  cancelBtn.disabled = true;
+  progress.classList.remove('hidden');
+
+  const rows = [];
+
+  try {
+    for (let index = 0; index < domains.length; index++) {
+      const domain = domains[index];
+      const baseProgress = (index / domains.length) * 100;
+
+      updateBulkProgress(baseProgress, `${index + 1} of ${domains.length}: resolving site IP for ${domain}`);
+      const siteIp = await resolveFirstARecord(domain);
+
+      updateBulkProgress(baseProgress + (35 / domains.length), `${index + 1} of ${domains.length}: resolving MX IP for ${domain}`);
+      const mxIp = await resolveFirstMxIp(domain);
+
+      updateBulkProgress(baseProgress + (70 / domains.length), `${index + 1} of ${domains.length}: checking nameservers for ${domain}`);
+      const nameServers = await resolveNameServers(domain);
+
+      rows.push({
+        domain,
+        siteIp,
+        mxIp,
+        ns1: nameServers[0] || '',
+        ns2: nameServers[1] || ''
+      });
+
+      updateBulkProgress(((index + 1) / domains.length) * 100, `${index + 1} of ${domains.length}: completed ${domain}`);
+    }
+
+    const csv = buildBulkNsMxCsv(rows);
+    downloadTextFile(csv, `bulk-ns-mx-report-${formatDateForFilename(new Date())}.csv`, 'text/csv;charset=utf-8');
+
+    state.results['BULK_NS_MX_REPORT'] = {
+      local: {
+        provider: 'Bulk NS & MX Report',
+        location: 'CSV export',
+        data: { rows },
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    closeBulkReportModal();
+    displayResults('BULK_NS_MX_REPORT');
+  } catch (error) {
+    setBulkReportError(`Error generating bulk report: ${error.message}`);
+  } finally {
+    generateBtn.disabled = false;
+    cancelBtn.disabled = false;
+  }
+}
+
+async function resolveFirstARecord(domain) {
+  try {
+    const data = await fetchDNSResult(domain, 'A');
+    const answer = (data.Answer || []).find(record => isIPv4(record.data));
+    return answer?.data || '';
+  } catch (error) {
+    console.error(`Failed to resolve A record for ${domain}:`, error);
+    return '';
+  }
+}
+
+async function resolveFirstMxIp(domain) {
+  try {
+    const data = await fetchDNSResult(domain, 'MX');
+    const sortedAnswers = (data.Answer || [])
+      .filter(record => record.data)
+      .sort((a, b) => {
+        const priorityA = parseInt(String(a.data).split(/\s+/)[0], 10) || 0;
+        const priorityB = parseInt(String(b.data).split(/\s+/)[0], 10) || 0;
+        return priorityA - priorityB;
+      });
+
+    const firstMx = sortedAnswers[0];
+    if (!firstMx) {
+      return '';
+    }
+
+    const exchange = String(firstMx.data).split(/\s+/).slice(1).join(' ').replace(/\.$/, '');
+    return exchange ? await resolveFirstARecord(exchange) : '';
+  } catch (error) {
+    console.error(`Failed to resolve MX IP for ${domain}:`, error);
+    return '';
+  }
+}
+
+async function resolveNameServers(domain) {
+  try {
+    const data = await fetchDNSResult(domain, 'NS');
+    return (data.Answer || [])
+      .map(record => String(record.data || '').replace(/\.$/, ''))
+      .filter(Boolean)
+      .slice(0, 2);
+  } catch (error) {
+    console.error(`Failed to resolve NS records for ${domain}:`, error);
+    return [];
+  }
+}
+
+function buildBulkNsMxCsv(rows) {
+  const headers = ['Domain', 'Site IP', 'MX IP', 'NS 1', 'NS 2'];
+  const lines = [
+    headers.map(escapeCsvCell).join(',')
+  ];
+
+  rows.forEach(row => {
+    lines.push([
+      row.domain,
+      row.siteIp,
+      row.mxIp,
+      row.ns1,
+      row.ns2
+    ].map(escapeCsvCell).join(','));
+  });
+
+  return lines.join('\r\n');
+}
+
+function escapeCsvCell(value) {
+  const text = String(value ?? '');
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
+function downloadTextFile(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function formatDateForFilename(date) {
+  return date.toISOString().slice(0, 10);
 }
 
 async function lookupSPF(domain) {
@@ -642,7 +890,8 @@ function showLoading(type) {
     'ALL_RECORDS': 'Fetching all DNS records...',
     'PROPAGATION': 'Checking DNS propagation across multiple locations...',
     'REVERSE': 'Performing reverse DNS lookup...',
-    'SSL_CHECK': 'Analyzing SSL certificate...'
+    'SSL_CHECK': 'Analyzing SSL certificate...',
+    'BULK_NS_MX_REPORT': 'Generating bulk NS & MX report...'
   };
 
   document.getElementById('loadingMessage').textContent = messages[type] || 'Processing...';
@@ -741,6 +990,9 @@ async function renderResultContent(type) {
       break;
     case 'PROPAGATION':
       renderPropagationResults(container, results);
+      break;
+    case 'BULK_NS_MX_REPORT':
+      renderBulkNsMxReport(container, results);
       break;
     default:
       renderGenericRecords(container, results, type);
@@ -1262,6 +1514,51 @@ function renderGenericRecords(container, results, type) {
   });
 }
 
+function renderBulkNsMxReport(container, results) {
+  const result = Object.values(results)[0];
+  const rows = result?.data?.rows || [];
+  const card = createResultCard('Bulk NS & MX Report', `${rows.length} domains`);
+
+  if (!rows.length) {
+    addResultItem(card, 'Status', 'No rows generated');
+    container.appendChild(card);
+    return;
+  }
+
+  const tableWrapper = document.createElement('div');
+  tableWrapper.className = 'table-wrapper';
+
+  const table = document.createElement('table');
+  table.className = 'report-table';
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  ['Domain', 'Site IP', 'MX IP', 'NS 1', 'NS 2'].forEach(header => {
+    const th = document.createElement('th');
+    th.textContent = header;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    [row.domain, row.siteIp, row.mxIp, row.ns1, row.ns2].forEach(value => {
+      const td = document.createElement('td');
+      td.textContent = value || '-';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  tableWrapper.appendChild(table);
+  card.appendChild(tableWrapper);
+  addResultItem(card, 'Generated', formatTime(result.timestamp));
+
+  container.appendChild(card);
+}
+
 // ============================================
 // UI Helper Functions
 // ============================================
@@ -1671,7 +1968,8 @@ function formatTabName(type) {
     'PROPAGATION': 'Propagation',
     'WHOIS': 'WHOIS',
     'IP_WHOIS': 'IP Info',
-    'SSL_CHECK': 'SSL Report'
+    'SSL_CHECK': 'SSL Report',
+    'BULK_NS_MX_REPORT': 'Bulk Report'
   };
 
   return names[type] || type;
